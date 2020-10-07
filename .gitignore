@@ -160,3 +160,5 @@ vid/
 vidres/
 
 _.py
+
+*.out

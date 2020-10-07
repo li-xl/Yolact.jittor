@@ -35,12 +35,18 @@ def dcn_v2_conv_forward(input,offset,mask,weight,bias,stride,padding,dilation,de
     output_type = input.dtype
     output = jt.code(output_shape,output_type,inputs,
     cuda_header=r'''
+#undef out
 #include<cstdio>
 #include<cstring>
 #include<algorithm>
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
+#include <executor.h>
 using namespace std;
+
+namespace jittor {
+extern cublasHandle_t cublas_handle;
+} // jittor
 
 #define CUDA_KERNEL_LOOP(i, n)                          \
   for (int i = blockIdx.x * blockDim.x + threadIdx.x;   \
@@ -242,12 +248,19 @@ r'''
     const float ** ones_b;
     const float ** weight_b;
     const float ** bias_b;
-    cudaMalloc(&input_b,matrices_size);
-    cudaMalloc(&output_b,matrices_size);
-    cudaMalloc(&columns_b,matrices_size);
-    cudaMalloc(&ones_b,matrices_size);
-    cudaMalloc(&weight_b,matrices_size);
-    cudaMalloc(&bias_b,matrices_size);
+
+    size_t input_b_allocation;
+    size_t output_b_allocation;
+    size_t columns_b_allocation;
+    size_t ones_b_allocation;
+    size_t weight_b_allocation;
+    size_t bias_b_allocation;
+    input_b = (const float **)exe.allocator->alloc(matrices_size, input_b_allocation);
+    output_b = (float **)exe.allocator->alloc(matrices_size, output_b_allocation);
+    columns_b = (float **)exe.allocator->alloc(matrices_size, columns_b_allocation);
+    ones_b = (const float **)exe.allocator->alloc(matrices_size, ones_b_allocation);
+    weight_b = (const float **)exe.allocator->alloc(matrices_size, weight_b_allocation);
+    bias_b = (const float **)exe.allocator->alloc(matrices_size, bias_b_allocation);
 
     const int block = 128;
     const int grid = (batch + block - 1) / block;
@@ -272,12 +285,10 @@ r'''
     long n_ = height_out * width_out;
     long k_ = 1;
 
-    cublasHandle_t handle;
-    cublasStatus_t ret;
-    ret = cublasCreate(&handle);
+    cublasHandle_t& handle = cublas_handle;
     float alpha = 1.0f;
     float beta = 0.0f;
-    ret = cublasSgemmBatched(handle,
+    cublasSgemmBatched(handle,
                             CUBLAS_OP_T,
                             CUBLAS_OP_N,
                             n_,
@@ -289,7 +300,6 @@ r'''
                             &beta,
                             output_b, n_,
                             batch);
-    //cublasDestroy(handle);
 
     modulated_deformable_im2col_cuda(input_p,
                                      offset_p,
@@ -304,11 +314,8 @@ r'''
     long n = height_out * width_out;
     long k = channels * kernel_h * kernel_w;
 
-    
-    //ret = cublasCreate(&handle);
-
     float beta2 = 1.0f;
-    ret = cublasSgemmBatched(handle,
+    cublasSgemmBatched(handle,
                             CUBLAS_OP_N,
                             CUBLAS_OP_N,
                             n,
@@ -320,14 +327,13 @@ r'''
                             &beta2,
                             output_b, n,
                             batch);
-    cublasDestroy(handle);
 
-    cudaFree(input_b);
-    cudaFree(output_b);
-    cudaFree(columns_b);
-    cudaFree(ones_b);
-    cudaFree(weight_b);
-    cudaFree(bias_b);
+    exe.allocator->free(input_b, matrices_size, input_b_allocation);
+    exe.allocator->free(output_b, matrices_size, output_b_allocation);
+    exe.allocator->free(columns_b, matrices_size, columns_b_allocation);
+    exe.allocator->free(ones_b, matrices_size, ones_b_allocation);
+    exe.allocator->free(weight_b, matrices_size, weight_b_allocation);
+    exe.allocator->free(bias_b, matrices_size, bias_b_allocation);
 ''')
     return output
 
@@ -365,6 +371,10 @@ def dcn_v2_conv_backward(input,offset,mask,weight,bias,grad_output,stride,paddin
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
 using namespace std;
+
+namespace jittor {
+extern cublasHandle_t cublas_handle;
+} // jittor
 
 #define CUDA_KERNEL_LOOP(i, n)                          \
   for (int i = blockIdx.x * blockDim.x + threadIdx.x;   \
@@ -785,15 +795,12 @@ void modulated_deformable_col2im_coord_cuda(
 
         float alpha0  = 1.0f;
         float beta0 = 0.0f;
-        cublasHandle_t handle;
-        cublasStatus_t ret;
-        ret = cublasCreate(&handle);
+        cublasHandle_t& handle = cublas_handle;
 
-        ret = cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_T, n, m, k, &alpha0,
+        cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_T, n, m, k, &alpha0,
                          grad_output_n, n,
                          weight_p, m, &beta0,
                          columns_p, n);
-        //cublasDestroy(handle);
 
         // gradient w.r.t. input coordinate data
         modulated_deformable_col2im_coord_cuda(columns_p,
@@ -833,9 +840,8 @@ void modulated_deformable_col2im_coord_cuda(
 
         float alpha  = 1.0f;
         float beta = 1.0f;
-        //ret = cublasCreate(&handle);
 
-        ret = cublasSgemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, n_, m_, k_, &alpha,
+        cublasSgemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, n_, m_, k_, &alpha,
                          columns_p, k_,
                          grad_output_n, k_, &beta,
                          grad_weight_p, n_);
@@ -844,15 +850,13 @@ void modulated_deformable_col2im_coord_cuda(
         // gradient w.r.t. bias
         // long m_ = channels_out;
         // long k__ = height_out * width_out;
-        //ret = cublasCreate(&handle);
 
-        ret = cublasSgemv(handle,
+        cublasSgemv(handle,
                          CUBLAS_OP_T,
                          k_, m_, &alpha,
                          grad_output_n, k_,
                          ones_p, 1, &beta,
                          grad_bias_p, 1);
-        cublasDestroy(handle);
 
     }
     ''')

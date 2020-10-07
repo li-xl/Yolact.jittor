@@ -943,20 +943,39 @@ def evaluate(net:Yolact, dataset, train_mode=False):
     try:
         # Main eval loop
         # jt.profiler.start(0, 0)
-        for it, image_idx in enumerate(dataset_indices):
+        dataset.batch_size=1
+        dataset.num_workers = 1
+        # for it, image_idx in enumerate(dataset_indices):
+        for it, batch in enumerate(dataset):
+            # if it>100:break
             timer.reset()
-            with nvtx_scope('Load Data'):
-                with timer.env('Load Data'):
-                    img, gt, gt_masks, h, w, num_crowd = dataset.pull_item(image_idx)
+            # with nvtx_scope('Load Data'):
+            image_idx,img, gt, gt_masks, h, w, num_crowd = batch[0]
+            batch = jt.array([img])
+            # with nvtx_scope('Load Data'):
+            #     with timer.env('Load Data'):
+            #         img, gt, gt_masks, h, w, num_crowd = dataset.pull_item(image_idx)
 
-                    # Test flag, do not upvote
-                    if cfg.mask_proto_debug:
-                        with open('scripts/info.txt', 'w') as f:
-                            f.write(str(dataset.ids[image_idx]))
-                        np.save('scripts/gt.npy', gt_masks)
+            #         # Test flag, do not upvote
+            #         if cfg.mask_proto_debug:
+            #             with open('scripts/info.txt', 'w') as f:
+            #                 f.write(str(dataset.ids[image_idx]))
+            #             np.save('scripts/gt.npy', gt_masks)
 
-                    batch = jt.array([img])
+            #         batch = jt.array([img])
+            # with nvtx_scope('Model'):
+            #     with timer.env('Network Extra'):
+            #         preds = net(batch)
+            # with nvtx_scope('Fetch'):
+            #     # Perform the meat of the operation here depending on our mode.
+            #     if args.display:
+            #         img_numpy = prep_display(preds, img, h, w)
+            #     elif args.benchmark:
+            #         prep_benchmark(preds, h, w)
+            #     else:
+            #         prep_metrics(ap_data, preds, img, gt, gt_masks, h, w, num_crowd, dataset.ids[image_idx], detections)
             
+
             # with timer.env('Load Data'):
             #     img, gt, gt_masks, h, w, num_crowd = dataset.pull_item(image_idx)
 
@@ -966,30 +985,21 @@ def evaluate(net:Yolact, dataset, train_mode=False):
             #             f.write(str(dataset.ids[image_idx]))
             #         np.save('scripts/gt.npy', gt_masks)
 
-            #     batch = jt.array([img])
+            #     # batch = jt.array([img])
+            #     batch  = img.unsqueeze(0)
             
-            with nvtx_scope('Model'):
-                with timer.env('Network Extra'):
-                    preds = net(batch)
+           
             
-            # with timer.env('Network Extra'):
-            #     preds = net(batch)
-            with nvtx_scope('Fetch'):
-                # Perform the meat of the operation here depending on our mode.
-                if args.display:
-                    img_numpy = prep_display(preds, img, h, w)
-                elif args.benchmark:
-                    prep_benchmark(preds, h, w)
-                else:
-                    prep_metrics(ap_data, preds, img, gt, gt_masks, h, w, num_crowd, dataset.ids[image_idx], detections)
-            
+            with timer.env('Network Extra'):
+                preds = net(batch)
+          
 
-            # if args.display:
-            #     img_numpy = prep_display(preds, img, h, w)
-            # elif args.benchmark:
-            #     prep_benchmark(preds, h, w)
-            # else:
-            #     prep_metrics(ap_data, preds, img, gt, gt_masks, h, w, num_crowd, dataset.ids[image_idx], detections)
+            if args.display:
+                img_numpy = prep_display(preds, img, h, w)
+            elif args.benchmark:
+                prep_benchmark(preds, h, w)
+            else:
+                prep_metrics(ap_data, preds, img, gt, gt_masks, h, w, num_crowd, dataset.ids[image_idx], detections)
             
             # First couple of images take longer because we're constructing the graph.
             # Since that's technically initialization, don't include those in the FPS calculations.
@@ -1010,7 +1020,7 @@ def evaluate(net:Yolact, dataset, train_mode=False):
                 progress_bar.set_val(it+1)
                 print('\rProcessing Images  %s %6d / %6d (%5.2f%%)    %5.2f fps        '
                     % (repr(progress_bar), it+1, dataset_size, progress, fps), end='')
-
+            
         jt.sync_all(True)
         # jt.profiler.stop()
         # jt.profiler.report()
@@ -1121,8 +1131,11 @@ if __name__ == '__main__':
             exit()
 
         if args.image is None and args.video is None and args.images is None:
+            # dataset = COCODetection(cfg.dataset.valid_images, cfg.dataset.valid_info,
+                                    # transform=BaseTransform(), has_gt=cfg.dataset.has_gt)
             dataset = EvalCOCODetection(cfg.dataset.valid_images, cfg.dataset.valid_info,
                                     transform=BaseTransform(), has_gt=cfg.dataset.has_gt)
+            
             prep_coco_cats()
         else:
             dataset = None        
