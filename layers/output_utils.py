@@ -68,7 +68,7 @@ def postprocess(det_output, w, h, batch_idx=0, interpolation_mode='bilinear',
         if visualize_lincomb:
             display_lincomb(proto_data, masks)
 
-        masks = proto_data @ masks.transpose(1,0)
+        masks = jt.matmul(proto_data,masks.transpose(1,0))
         masks = cfg.mask_proto_mask_activation(masks)
 
         # Crop masks before upsampling because you know why
@@ -98,14 +98,14 @@ def postprocess(det_output, w, h, batch_idx=0, interpolation_mode='bilinear',
     
     boxes[:, 0], boxes[:, 2] = sanitize_coordinates(boxes[:, 0], boxes[:, 2], w, cast=False)
     boxes[:, 1], boxes[:, 3] = sanitize_coordinates(boxes[:, 1], boxes[:, 3], h, cast=False)
-    boxes = boxes.int64()
+    boxes = boxes.int32()
 
     if cfg.mask_type == mask_type.direct and cfg.eval_mask_branch:
         # Upscale masks
         full_masks = jt.zeros(masks.shape[0], h, w)
 
         for jdx in range(masks.shape[0]):
-            x1, y1, x2, y2 = boxes[jdx, :]
+            x1, y1, x2, y2 = boxes[jdx]
 
             mask_w = x2 - x1
             mask_h = y2 - y1
@@ -114,9 +114,9 @@ def postprocess(det_output, w, h, batch_idx=0, interpolation_mode='bilinear',
             if mask_w * mask_h <= 0 or mask_w < 0:
                 continue
             
-            mask = masks[jdx, :].view(1, 1, cfg.mask_size, cfg.mask_size)
+            mask = masks[jdx].view(1, 1, cfg.mask_size, cfg.mask_size)
             mask = nn.interpolate(mask, (mask_h, mask_w), mode=interpolation_mode, align_corners=False)
-            mask = mask.gt(0.5).float()
+            mask = (mask>0.5).float()
             full_masks[jdx, y1:y2, x1:x2] = mask
         
         masks = full_masks
@@ -153,7 +153,7 @@ def display_lincomb(proto_data, masks):
     for kdx in range(1):
         jdx = kdx + 0
         import matplotlib.pyplot as plt
-        coeffs = masks[jdx, :].numpy()
+        coeffs = masks[jdx].numpy()
         idx = np.argsort(-np.abs(coeffs))
         # plt.bar(list(range(idx.shape[0])), coeffs[idx])
         # plt.show()

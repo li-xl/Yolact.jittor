@@ -67,7 +67,8 @@ class Detect(object):
             conf_preds = conf_data.view(batch_size, num_priors, self.num_classes).transpose(0,2, 1)
             for batch_idx in range(batch_size):
                 decoded_boxes = decode(loc_data[batch_idx], prior_data)
-                result = self.detect(batch_idx, conf_preds, decoded_boxes, mask_data, inst_data)
+                with timer.env('self.detect'):
+                    result = self.detect(batch_idx, conf_preds, decoded_boxes, mask_data, inst_data)
 
                 if result is not None and proto_data is not None:
                     result['proto'] = proto_data[batch_idx]
@@ -79,19 +80,20 @@ class Detect(object):
 
     def detect(self, batch_idx, conf_preds, decoded_boxes, mask_data, inst_data):
         """ Perform nms for only the max scoring class that isn't background (class 0) """
+        with timer.env('Slices'):
+            cur_scores = conf_preds[batch_idx, 1:]
+            conf_scores = jt.max(cur_scores, dim=0)
         
-        cur_scores = conf_preds[batch_idx, 1:, :]
-        conf_scores = jt.max(cur_scores, dim=0)
-        with timer.env('Keep Slice'):
             keep = (conf_scores > self.conf_thresh)
-
             keep = jt.where(keep)[0]
+
             scores = cur_scores[:, keep]
-            boxes = decoded_boxes[keep, :]
-            masks = mask_data[batch_idx, keep, :]
+            boxes = decoded_boxes[keep]
+            masks = mask_data[batch_idx, keep]
 
             if inst_data is not None:
-                inst = inst_data[batch_idx, keep, :]
+                inst = inst_data[batch_idx, keep]
+    
     
         if scores.shape[1] == 0:
             return None
@@ -110,7 +112,7 @@ class Detect(object):
 
     def cc_fast_nms(self, boxes, masks, scores, iou_threshold:float=0.5, top_k:int=200):
         # Collapse all the classes into 1 
-        scores, classes = scores.max(dim=0)
+        classes,scores = scores.argmax(dim=0)
 
         idx,_ = scores.argsort(0, descending=True)
         idx = idx[:top_k]
@@ -142,8 +144,8 @@ class Detect(object):
     
         num_classes, num_dets = idx.shape
 
-        boxes = boxes[idx.view(-1), :].view(num_classes, num_dets, 4)
-        masks = masks[idx.view(-1), :].view(num_classes, num_dets, -1)
+        boxes = boxes[idx.view(-1)].view(num_classes, num_dets, 4)
+        masks = masks[idx.view(-1)].view(num_classes, num_dets, -1)
 
         iou = jaccard(boxes, boxes)
         iou = iou.triu_(diagonal=1)
@@ -168,14 +170,21 @@ class Detect(object):
         masks = masks[keep]
         scores = scores[keep]
         
+        #print('keep finish')
         # Only keep the top cfg.max_num_detections highest scores across all classes
-        idx,scores  = scores.argsort(0, descending=True)
+        idx,scores  = jt.argsort(scores,dim=0, descending=True)
+        #print('argsort finish')
         idx = idx[:cfg.max_num_detections]
         scores = scores[:cfg.max_num_detections]
-
         classes = classes[idx]
         boxes = boxes[idx]
         masks = masks[idx]
+        '''
+        scores = scores[:cfg.max_num_detections]
+        classes = classes[:cfg.max_num_detections]
+        boxes = boxes[:cfg.max_num_detections]
+        masks = masks[:cfg.max_num_detections]
+        '''
 
         return boxes, masks, classes, scores
 
@@ -195,7 +204,7 @@ class Detect(object):
         boxes = boxes * cfg.max_size
 
         for _cls in range(num_classes):
-            cls_scores = scores[_cls, :]
+            cls_scores = scores[_cls]
             conf_mask = cls_scores > conf_thresh
             idx = jt.arange(cls_scores.shape[0], device=boxes.device)
 

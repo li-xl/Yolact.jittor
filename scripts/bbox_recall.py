@@ -161,7 +161,7 @@ if __name__ == '__main__':
             start = i * chunk_size
             end   = min((i + 1) * chunk_size, bboxes_rel.size(0))
             
-            ious = jaccard(bboxes_rel[start:end, :], anchors)
+            ious = jaccard(bboxes_rel[start:end], anchors)
             maxes, maxidx = jt.max(ious, dim=1)
 
             perGTAnchorMax[start:end] = maxes

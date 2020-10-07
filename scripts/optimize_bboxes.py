@@ -130,7 +130,7 @@ def optimize(full_bboxes, optim_idx, batch_size=5000):
     if batch_idx > (full_bboxes.size(0) // batch_size):
         batch_idx = 0
 
-    bboxes = full_bboxes[start:end, :]
+    bboxes = full_bboxes[start:end]
 
     anchor_base = [
         make_priors(conv_sizes[idx], scales[idx], aspect_ratios[idx])

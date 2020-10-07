@@ -202,7 +202,7 @@ def match(pos_thresh, neg_thresh, truths, priors, labels, crowd_boxes, loc_t, co
         # Set all other overlaps with i to be -1 so that no other gt uses it
         overlaps[:, i] = -1
         # Set all other overlaps with j to be -1 so that this loop never uses j again
-        overlaps[j, :] = -1
+        overlaps[j,:] = -1
 
         # Overwrite i's score to be 2 so it doesn't get thresholded ever
         best_truth_overlap[i] = 2
@@ -222,7 +222,10 @@ def match(pos_thresh, neg_thresh, truths, priors, labels, crowd_boxes, loc_t, co
         best_crowd_idx,best_crowd_overlap = crowd_overlaps.argmax(1)
         # Set non-positives with crowd iou of over the threshold to be neutral.
         conf[(conf <= 0) & (best_crowd_overlap > cfg.crowd_iou_threshold)] = -1
+    
+    print('matches',matches)
     loc = encode(matches, priors, cfg.use_yolo_regressors)
+    print('loc',loc)
     loc_t[idx]  = loc    # [num_priors,4] encoded offsets to learn
     conf_t[idx] = conf   # [num_priors] top class label for each prior
     idx_t[idx]  = best_truth_idx # [num_priors] indices for lookup
@@ -240,7 +243,7 @@ def encode(matched, priors, use_yolo_regressors:bool=False):
     Return: A tensor with encoded relative coordinates in the format
             outputted by the network (see decode). Size: [num_priors, 4]
     """
-
+    print(use_yolo_regressors)
     if use_yolo_regressors:
         # Exactly the reverse of what we did in decode
         # In fact encode(decode(x, p), p) should be x
@@ -337,8 +340,8 @@ def sanitize_coordinates(_x1, _x2, img_size:int, padding:int=0, cast:bool=True):
     _x1 = _x1 * img_size
     _x2 = _x2 * img_size
     if cast:
-        _x1 = _x1.int64()
-        _x2 = _x2.int64()
+        _x1 = _x1.int32()
+        _x2 = _x2.int32()
     x1 =  jt.minimum(_x1, _x2)
     x2 =  jt.maximum(_x1, _x2)
     x1 =  jt.clamp(x1-padding, min_v=0)

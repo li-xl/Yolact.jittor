@@ -1,4 +1,4 @@
-from data import COCODetection, get_label_map, MEANS, COLORS
+from data import COCODetection,EvalCOCODetection, get_label_map, MEANS, COLORS
 from yolact import Yolact
 from utils.augmentations import BaseTransform, FastBaseTransform, Resize
 from utils.functions import MovingAverage, ProgressBar
@@ -187,7 +187,7 @@ def prep_display(dets_out, img, h, w, undo_transform=True, class_color=False, ma
     # I wish I had access to OpenGL or Vulkan but alas, I guess Pyjt tensor operations will have to suffice
     if args.display_masks and cfg.eval_mask_branch and num_dets_to_consider > 0:
         # After this, mask is of size [num_dets, h, w, 1]
-        masks = masks[:num_dets_to_consider, :, :].unsqueeze(3)
+        masks = masks[:num_dets_to_consider].unsqueeze(3)
         
         # Prepare the RGB images for each mask given their color (size [num_dets, h, w, 1])
         colors = jt.contrib.concat([get_color(j,0).view(1, 1, 1, 3) for j in range(num_dets_to_consider)], dim=0)
@@ -267,16 +267,26 @@ def prep_benchmark(dets_out, h, w):
     with timer.env('Postprocess'):
         t = postprocess(dets_out, w, h, crop_masks=args.crop, score_threshold=args.score_threshold)
 
+    result = {}
     with timer.env('Copy'):
         classes, scores, boxes, masks = [x[:args.top_k] for x in t]
         if isinstance(scores, list):
-            box_scores = scores[0].numpy()
-            mask_scores = scores[1].numpy()
+            box_scores = scores[0]#.numpy()
+            mask_scores = scores[1]#.numpy()
+            jt.fetch(box_scores,lambda box_scores: result.update({'box_scores':box_scores}))
+            jt.fetch(mask_scores,lambda mask_scores: result.update({'mask_scores':mask_scores}))
+
         else:
-            scores = scores.numpy()
-        classes = classes.numpy()
-        boxes = boxes.numpy()
-        masks = masks.numpy()
+            # scores = scores#.numpy()
+            jt.fetch(scores,lambda scores: result.update({'scores':scores}))
+
+        # classes = classes#.numpy()
+        # boxes = boxes#.numpy()
+        # masks = masks#.numpy()
+        jt.fetch(classes,lambda classes: result.update({'classes':classes}))
+        jt.fetch(boxes,lambda boxes: result.update({'boxes':boxes}))
+        jt.fetch(masks,lambda masks: result.update({'masks':masks}))
+
     
     with timer.env('Sync'):
         # Just in case
@@ -867,6 +877,8 @@ def evalvideo(net:Yolact, path:str, out_path:str=None):
     
     cleanup_and_exit()
 
+from jittor.utils.nvtx import nvtx_scope
+
 def evaluate(net:Yolact, dataset, train_mode=False):
     net.detect.use_fast_nms = args.fast_nms
     net.detect.use_cross_class_nms = args.cross_class_nms
@@ -924,35 +936,60 @@ def evaluate(net:Yolact, dataset, train_mode=False):
         # handles the data, we get the same result every time.
         hashed = [badhash(x) for x in dataset.ids]
         dataset_indices.sort(key=lambda x: hashed[x])
-
+    
+    # dataset_size=1000
     dataset_indices = dataset_indices[:dataset_size]
 
     try:
         # Main eval loop
+        # jt.profiler.start(0, 0)
         for it, image_idx in enumerate(dataset_indices):
             timer.reset()
+            with nvtx_scope('Load Data'):
+                with timer.env('Load Data'):
+                    img, gt, gt_masks, h, w, num_crowd = dataset.pull_item(image_idx)
 
-            with timer.env('Load Data'):
-                img, gt, gt_masks, h, w, num_crowd = dataset.pull_item(image_idx)
+                    # Test flag, do not upvote
+                    if cfg.mask_proto_debug:
+                        with open('scripts/info.txt', 'w') as f:
+                            f.write(str(dataset.ids[image_idx]))
+                        np.save('scripts/gt.npy', gt_masks)
 
-                # Test flag, do not upvote
-                if cfg.mask_proto_debug:
-                    with open('scripts/info.txt', 'w') as f:
-                        f.write(str(dataset.ids[image_idx]))
-                    np.save('scripts/gt.npy', gt_masks)
+                    batch = jt.array([img])
+            
+            # with timer.env('Load Data'):
+            #     img, gt, gt_masks, h, w, num_crowd = dataset.pull_item(image_idx)
 
-                batch = jt.array(img.unsqueeze(0))
+            #     # Test flag, do not upvote
+            #     if cfg.mask_proto_debug:
+            #         with open('scripts/info.txt', 'w') as f:
+            #             f.write(str(dataset.ids[image_idx]))
+            #         np.save('scripts/gt.npy', gt_masks)
 
-            with timer.env('Network Extra'):
-                preds = net(batch)
+            #     batch = jt.array([img])
+            
+            with nvtx_scope('Model'):
+                with timer.env('Network Extra'):
+                    preds = net(batch)
+            
+            # with timer.env('Network Extra'):
+            #     preds = net(batch)
+            with nvtx_scope('Fetch'):
+                # Perform the meat of the operation here depending on our mode.
+                if args.display:
+                    img_numpy = prep_display(preds, img, h, w)
+                elif args.benchmark:
+                    prep_benchmark(preds, h, w)
+                else:
+                    prep_metrics(ap_data, preds, img, gt, gt_masks, h, w, num_crowd, dataset.ids[image_idx], detections)
+            
 
-            # Perform the meat of the operation here depending on our mode.
-            if args.display:
-                img_numpy = prep_display(preds, img, h, w)
-            elif args.benchmark:
-                prep_benchmark(preds, h, w)
-            else:
-                prep_metrics(ap_data, preds, img, gt, gt_masks, h, w, num_crowd, dataset.ids[image_idx], detections)
+            # if args.display:
+            #     img_numpy = prep_display(preds, img, h, w)
+            # elif args.benchmark:
+            #     prep_benchmark(preds, h, w)
+            # else:
+            #     prep_metrics(ap_data, preds, img, gt, gt_masks, h, w, num_crowd, dataset.ids[image_idx], detections)
             
             # First couple of images take longer because we're constructing the graph.
             # Since that's technically initialization, don't include those in the FPS calculations.
@@ -974,7 +1011,9 @@ def evaluate(net:Yolact, dataset, train_mode=False):
                 print('\rProcessing Images  %s %6d / %6d (%5.2f%%)    %5.2f fps        '
                     % (repr(progress_bar), it+1, dataset_size, progress, fps), end='')
 
-
+        jt.sync_all(True)
+        # jt.profiler.stop()
+        # jt.profiler.report()
 
         if not args.display and not args.benchmark:
             print()
@@ -998,7 +1037,6 @@ def evaluate(net:Yolact, dataset, train_mode=False):
             timer.print_stats()
             avg_seconds = frame_times.get_avg()
             print('Average: %5.2f fps, %5.2f ms' % (1 / frame_times.get_avg(), 1000*avg_seconds))
-
     except KeyboardInterrupt:
         print('Stopping..')
 
@@ -1083,7 +1121,7 @@ if __name__ == '__main__':
             exit()
 
         if args.image is None and args.video is None and args.images is None:
-            dataset = COCODetection(cfg.dataset.valid_images, cfg.dataset.valid_info,
+            dataset = EvalCOCODetection(cfg.dataset.valid_images, cfg.dataset.valid_info,
                                     transform=BaseTransform(), has_gt=cfg.dataset.has_gt)
             prep_coco_cats()
         else:

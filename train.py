@@ -283,7 +283,7 @@ def train():
                 
                 # no_inf_mean removes some components from the loss, so make sure to backward through all of it
                 # all_loss = sum([v.mean() for v in losses.values()])
-
+                jt.sync_all()
                 # Backprop
                 optimizer.step(loss)
                 

@@ -289,7 +289,7 @@ r'''
                             &beta,
                             output_b, n_,
                             batch);
-    cublasDestroy(handle);
+    //cublasDestroy(handle);
 
     modulated_deformable_im2col_cuda(input_p,
                                      offset_p,
@@ -305,7 +305,7 @@ r'''
     long k = channels * kernel_h * kernel_w;
 
     
-    ret = cublasCreate(&handle);
+    //ret = cublasCreate(&handle);
 
     float beta2 = 1.0f;
     ret = cublasSgemmBatched(handle,
@@ -793,7 +793,7 @@ void modulated_deformable_col2im_coord_cuda(
                          grad_output_n, n,
                          weight_p, m, &beta0,
                          columns_p, n);
-        cublasDestroy(handle);
+        //cublasDestroy(handle);
 
         // gradient w.r.t. input coordinate data
         modulated_deformable_col2im_coord_cuda(columns_p,
@@ -833,18 +833,18 @@ void modulated_deformable_col2im_coord_cuda(
 
         float alpha  = 1.0f;
         float beta = 1.0f;
-        ret = cublasCreate(&handle);
+        //ret = cublasCreate(&handle);
 
         ret = cublasSgemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, n_, m_, k_, &alpha,
                          columns_p, k_,
                          grad_output_n, k_, &beta,
                          grad_weight_p, n_);
-        cublasDestroy(handle);
+        //cublasDestroy(handle);
 
         // gradient w.r.t. bias
         // long m_ = channels_out;
         // long k__ = height_out * width_out;
-        ret = cublasCreate(&handle);
+        //ret = cublasCreate(&handle);
 
         ret = cublasSgemv(handle,
                          CUBLAS_OP_T,

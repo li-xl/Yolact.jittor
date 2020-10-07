@@ -124,7 +124,7 @@ class MultiBoxLoss(nn.Module):
             if cfg.use_class_existence_loss:
                 # Construct a one-hot vector for each object and collapse it into an existence vector with max
                 # Also it's fine to include the crowd annotations here
-                class_existence_t[idx, :] = jt.eye(num_classes-1)[labels[idx]].max(dim=0)[0]
+                class_existence_t[idx] = jt.eye(num_classes-1)[labels[idx]].max(dim=0)[0]
 
             # Split the crowd annotations because they come bundled in
             cur_crowds = num_crowds[idx]
@@ -143,7 +143,7 @@ class MultiBoxLoss(nn.Module):
                   truths, priors, labels[idx], crowd_boxes,
                   loc_t, conf_t, idx_t, idx, loc_data[idx])
                   
-            gt_box_t[idx, :, :] = truths[idx_t[idx]]
+            gt_box_t[idx] = truths[idx_t[idx]]
 
         # wrap targets
         loc_t.stop_grad()
@@ -163,6 +163,7 @@ class MultiBoxLoss(nn.Module):
         if cfg.train_boxes:
             loc_p = loc_data[pos_idx].view(-1, 4)
             loc_t = loc_t[pos_idx].view(-1, 4)
+            print(loc_t)
             losses['B'] = nn.smooth_l1_loss(loc_p, loc_t, reduction='sum') * cfg.bbox_alpha
 
         if cfg.train_masks:
@@ -432,7 +433,7 @@ class MultiBoxLoss(nn.Module):
         obj_neg_loss = - nn.log_sigmoid(-obj_data_neg).sum()
 
         with jt.no_grad():
-            pos_priors = priors.unsqueeze(0).expand(batch_size, -1, -1).reshape(-1, 4)[pos_mask, :]
+            pos_priors = priors.unsqueeze(0).expand(batch_size, -1, -1).reshape(-1, 4)[pos_mask]
 
             boxes_pred = decode(loc_p, pos_priors, cfg.use_yolo_regressors)
             boxes_targ = decode(loc_t, pos_priors, cfg.use_yolo_regressors)
@@ -456,16 +457,16 @@ class MultiBoxLoss(nn.Module):
         loss_m = 0
         for idx in range(mask_data.shape[0]):
             with jt.no_grad():
-                cur_pos_idx = pos_idx[idx, :, :]
+                cur_pos_idx = pos_idx[idx]
                 cur_pos_idx_squeezed = cur_pos_idx[:, 1]
 
                 # Shape: [num_priors, 4], decoded predicted bboxes
-                pos_bboxes = decode(loc_data[idx, :, :], priors.data, cfg.use_yolo_regressors)
+                pos_bboxes = decode(loc_data[idx], priors.data, cfg.use_yolo_regressors)
                 pos_bboxes = pos_bboxes[cur_pos_idx].view(-1, 4).clamp(0, 1)
                 pos_lookup = idx_t[idx, cur_pos_idx_squeezed]
 
                 cur_masks = masks[idx]
-                pos_masks = cur_masks[pos_lookup, :, :]
+                pos_masks = cur_masks[pos_lookup]
                 
                 # Convert bboxes to absolute coordinates
                 num_pos, img_height, img_width = pos_masks.shape
