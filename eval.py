@@ -1,3 +1,4 @@
+import torch
 from data import COCODetection,EvalCOCODetection, get_label_map, MEANS, COLORS
 from yolact import Yolact
 from utils.augmentations import BaseTransform, FastBaseTransform, Resize
@@ -943,7 +944,12 @@ def evaluate(net:Yolact, dataset, train_mode=False):
         for it, batch in enumerate(dataset):
             timer.reset()
             image_idx,img, gt, gt_masks, h, w, num_crowd = batch[0]
-            batch = jt.array([img])
+            
+            if not args.benchmark:
+                gt = gt.numpy()
+                gt_masks = gt_masks.numpy()
+            batch = img.reshape(1,img.shape[0],img.shape[1],img.shape[2])
+            # batch = jt.array([img])
             
             
             with timer.env('Network Extra'):

@@ -291,10 +291,10 @@ def train():
                 jt.sync(optimizer.param_groups[0]['params'])
                 
                 # Add the loss to the moving average for bookkeeping
-                # for k in losses:
-                #     loss_avgs[k].add(losses[k].item())
                 for k in losses:
-                    loss_avgs[k].add(0)
+                    loss_avgs[k].add(losses[k].item())
+                # for k in losses:
+                #     loss_avgs[k].add(0)
                 cur_time  = time.time()
                 elapsed   = cur_time - last_time
                 last_time = cur_time
@@ -348,8 +348,6 @@ def train():
                 if epoch % args.validation_epoch == 0 and epoch > 0:
                     compute_validation_map(epoch, iteration, yolact_net, val_dataset, log if args.log else None)
         
-        # jt.profiler.stop()
-        # jt.profiler.report()
         # Compute validation mAP after training is finished
         # compute_validation_map(epoch, iteration, yolact_net, val_dataset, log if args.log else None)
     except KeyboardInterrupt:
